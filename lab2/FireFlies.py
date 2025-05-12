@@ -4,14 +4,15 @@ class Firefly:
     def __init__(self, dim, pos_bounds):
         self.dim = dim
         self.pos_bounds = np.array(pos_bounds)
-        # Ініціалізація випадкової позиції світлячка у межах простору (пункт 1.5 методички)
+        # Ініціалізація випадкової позиції світлячка у межах простору
         self.position = np.random.uniform(self.pos_bounds[:, 0], self.pos_bounds[:, 1])
-        self.score = float('inf')  # Значення цільової функції
+        self.score = float('inf') 
 
 class FireflyAlgorithm:
     def __init__(self, fitness_func, num_fireflies, dim, pos_bounds, max_iter, 
                  alpha=0.2, beta0=1.0, gamma=1.0,
-                 target_score=None, epsilon_target=None):
+                 target_score=None, epsilon_target=None,
+                 epsilon_stagnation=1e-6, stagnation_iter=20):
         self.fitness_func = fitness_func
         # K — кількість світлячків 
         self.num_fireflies = num_fireflies
@@ -31,6 +32,9 @@ class FireflyAlgorithm:
 
         self.target_score = target_score
         self.epsilon_target = epsilon_target
+
+        self.stagnation_iter = stagnation_iter
+        self.epsilon_stagnation = epsilon_stagnation    
 
         # Ініціалізація популяції світлячків
         positions = self._latin_hypercube_init(num_fireflies, dim, pos_bounds)
@@ -69,40 +73,48 @@ class FireflyAlgorithm:
         return False
     
     def run(self):
-        for iteration in range(self.max_iter):  # Початок ітерації n 
-            for firefly in self.fireflies:
-                firefly.score = self.fitness_func(firefly.position)  # Оцінка значення цільової функції 
+        stagnation_counter = 0
+        previous_best = float('inf')
 
-            for i in range(self.num_fireflies):  # Вибір світлячка k 
-                for j in range(self.num_fireflies):  # Вибір світлячка l 
+        for iteration in range(self.max_iter):
+            for firefly in self.fireflies:
+                firefly.score = self.fitness_func(firefly.position)
+
+            for i in range(self.num_fireflies):
+                for j in range(self.num_fireflies):
                     if self.fireflies[j].score < self.fireflies[i].score:
                         distance = np.linalg.norm(self.fireflies[i].position - self.fireflies[j].position)
-                        beta = self._attractiveness(distance)  # Розрахунок яскравості beta 
+                        beta = self._attractiveness(distance)
                         rand = np.random.uniform(-0.5, 0.5, self.dim)
-                        # Формула оновлення позиції світлячка k за впливом l 
                         self.fireflies[i].position += beta * (self.fireflies[j].position - self.fireflies[i].position) + self.alpha * rand
-                        # Обмеження позиції в межах простору 
                         self.fireflies[i].position = np.clip(self.fireflies[i].position, self.pos_bounds[:, 0], self.pos_bounds[:, 1])
 
-            # Адаптивне зменшення alpha і збільшення gamma
             self.alpha *= 0.97
             self.gamma *= 1.02
 
-            # Визначення найкращого світлячка 
             best_firefly = min(self.fireflies, key=lambda f: f.score)
             if best_firefly.score < self.best_score:
                 self.best_score = best_firefly.score
-                self.best_position = best_firefly.position.copy()  # Оновлення глобального найкращого рішення
+                self.best_position = best_firefly.position.copy()
 
-            # Збереження історії найкращого результату та всіх позицій
             self.history_best.append((self.best_position.copy(), self.best_score))
             self.history_all_positions.append([f.position.copy() for f in self.fireflies])
 
             if iteration % 10 == 0:
                 print(f"Iteration {iteration}: Global best score = {self.best_score}")
-            
+
             if self._check_termination(iteration):
                 break
 
-        # Завершення після N ітерацій 
+            # Перевірка стагнації
+            if abs(previous_best - self.best_score) < self.epsilon_stagnation:
+                stagnation_counter += 1
+            else:
+                stagnation_counter = 0
+                previous_best = self.best_score
+
+            if stagnation_counter >= self.stagnation_iter:
+                print(f"Stagnation detected. Early stopping at iteration {iteration}.")
+                break
+
         return self.best_position, self.best_score, self.history_best, self.history_all_positions
